@@ -4,7 +4,6 @@ namespace App\Services;
 
 use Google_Client;
 use GuzzleHttp\Client;
-use Illuminate\Http\JsonResponse;
 
 class FirebaseService
 {
@@ -22,13 +21,18 @@ class FirebaseService
         $this->accessToken = $this->googleClient->fetchAccessTokenWithAssertion()['access_token'];
     }
 
-    public function sendNotification(array $deviceTokens, $title, $body): JsonResponse
+    public function getGoogleOAuthToken()
+    {
+        return $this->accessToken;
+    }
+    public function sendNotification(array $deviceTokens, $title, $body, $googleOAuthToken)
     {
         $url ='https://fcm.googleapis.com/v1/projects/'. env('FIREBASE_PROJECT_ID') .'/messages:send';
         $headers = [
-            'Authorization' => 'Bearer ' . $this->accessToken,
+            'Authorization' => 'Bearer ' . $googleOAuthToken,
             'Content-Type' => 'application/json',
         ];
+
 
         $message = [
             'message' => [
@@ -40,12 +44,13 @@ class FirebaseService
             ],
         ];
 
-
         $response = $this->client->post($url, [
-            'headers' => $headers,
-            'json' => json_encode($message),
+                'headers' => $headers,
+                'body' => json_encode($message),
         ]);
 
-        return response()->json($response);
+        dd($response);
+
+        return $response;
     }
 }
