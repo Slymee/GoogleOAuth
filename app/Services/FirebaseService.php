@@ -28,21 +28,43 @@ class FirebaseService
     public function sendNotification(array $deviceTokens, $title, $body, $googleOAuthToken)
     {
         $url ='https://fcm.googleapis.com/v1/projects/'. env('FIREBASE_PROJECT_ID') .'/messages:send';
+
         $headers = [
             'Authorization' => 'Bearer ' . $googleOAuthToken,
             'Content-Type' => 'application/json',
         ];
 
+        $batchSize = 500;
+        $batches = array_chunk($deviceTokens, $batchSize);
+
+//        $message = [
+//            'message' => [
+//                'token' => $deviceTokens,
+//                'notification' => [
+//                    'title' => $title,
+//                    'body' => $body,
+//                ],
+//            ],
+//        ];
 
         $message = [
             'message' => [
-                'token' => $deviceTokens,
                 'notification' => [
                     'title' => $title,
                     'body' => $body,
                 ],
             ],
         ];
+
+        foreach ($batches as $batch) {
+            $message['message']['token'] = $batch;
+            $response = $this->client->post($url, [
+                'headers' => $headers,
+                'body' => json_encode($message),
+            ]);
+
+            return response()->json(($response->getStatusCode() == 200) ? ['Success' => true] : ['Error' => 'Failed to send notification'], ($response->getStatusCode() == 200) ? 200 : 400);
+        }
 
         $response = $this->client->post($url, [
                 'headers' => $headers,
