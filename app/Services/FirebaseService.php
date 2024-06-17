@@ -4,6 +4,8 @@ namespace App\Services;
 
 use Google_Client;
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\RequestException;
+use GuzzleHttp\Promise;
 
 class FirebaseService
 {
@@ -15,64 +17,69 @@ class FirebaseService
     {
         $this->client = new Client();
         $this->googleClient = new Google_Client();
-        $this->googleClient->setAuthConfig(storage_path('app/'. env('FIREBASE_JSON_FILE')));
+        $this->googleClient->setAuthConfig(storage_path('app/' . env('FIREBASE_JSON_FILE')));
         $this->googleClient->setSubject(env('FIREBASE_CLIENT_EMAIL'));
         $this->googleClient->addScope('https://www.googleapis.com/auth/firebase.messaging');
         $this->accessToken = $this->googleClient->fetchAccessTokenWithAssertion()['access_token'];
     }
 
-    public function getGoogleOAuthToken()
+    /**
+     * @return mixed
+     */
+    public function getGoogleOAuthToken(): mixed
     {
         return $this->accessToken;
     }
-    public function sendNotification(array $deviceTokens, $title, $body, $googleOAuthToken)
+
+    public function sendNotification(array $deviceTokens, $title, $body)
     {
-        $url ='https://fcm.googleapis.com/v1/projects/'. env('FIREBASE_PROJECT_ID') .'/messages:send';
+        $url = 'https://fcm.googleapis.com/v1/projects/' . env('FIREBASE_PROJECT_ID') . '/messages:send';
 
         $headers = [
-            'Authorization' => 'Bearer ' . $googleOAuthToken,
+            'Authorization' => 'Bearer ' . $this->accessToken,
             'Content-Type' => 'application/json',
         ];
 
         $batchSize = 500;
         $batches = array_chunk($deviceTokens, $batchSize);
 
-//        $message = [
-//            'message' => [
-//                'token' => $deviceTokens,
-//                'notification' => [
-//                    'title' => $title,
-//                    'body' => $body,
-//                ],
-//            ],
-//        ];
-
-        $message = [
-            'message' => [
-                'notification' => [
-                    'title' => $title,
-                    'body' => $body,
-                ],
-            ],
-        ];
+        $responses = [];
 
         foreach ($batches as $batch) {
-            $message['message']['token'] = $batch;
-            $response = $this->client->post($url, [
-                'headers' => $headers,
-                'body' => json_encode($message),
-            ]);
+            $message = [
+                'message' => [
+                    'notification' => [
+                        'title' => $title,
+                        'body' => $body,
+                    ],
+                    'token' => $batch,
+                ],
+            ];
 
-            return response()->json(($response->getStatusCode() == 200) ? ['Success' => true] : ['Error' => 'Failed to send notification'], ($response->getStatusCode() == 200) ? 200 : 400);
+            $promises = [];
+
+            foreach ($batch as $token) {
+                $message['message']['token'] = $token;
+                $promises[] = $this->client->postAsync($url, [
+                    'headers' => $headers,
+                    'body' => json_encode($message),
+                ]);
+            }
+
+            try {
+                $results = Promise\settle($promises)->wait();
+                foreach ($results as $result) {
+                    if ($result['state'] === 'fulfilled') {
+                        $responses[] = json_decode($result['value']->getBody()->getContents(), true);
+                    } else {
+                        $responses[] = ['error' => $result['reason']->getMessage()];
+                    }
+                }
+            } catch (RequestException $e) {
+                $responses[] = ['error' => $e->getMessage()];
+            }
         }
 
-        $response = $this->client->post($url, [
-                'headers' => $headers,
-                'body' => json_encode($message),
-        ]);
-
-        dd($response);
-
-        return $response;
+        return $responses;
     }
 }
